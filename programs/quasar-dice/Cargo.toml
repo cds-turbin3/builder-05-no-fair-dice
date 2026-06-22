@@ -1,0 +1,29 @@
+[package]
+name = "quasar-dice"
+version = "0.1.0"
+edition = "2021"
+
+# A native Quasar commit-reveal dice game. Pure SOL custody, commit-reveal
+# randomness over sha256, and instruction introspection. Quasar ships no
+# introspection helper, so `introspection` parses the Instructions sysvar
+# directly (the stock solana-instructions-sysvar loader wants solana_program's
+# AccountInfo, not Quasar's AccountView). Built with `cargo build-sbf`; pinned to
+# the exact quasar rev it was written against.
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[features]
+alloc = []
+client = []
+debug = []
+idl-build = ["quasar-lang/idl-build"]
+
+[dependencies]
+quasar-lang = { git = "https://github.com/blueshift-gg/quasar", rev = "a89a9329f05740a20520607608b2b3b78c74f7c4" }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
