@@ -1025,6 +1025,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itoa"
+version = "1.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
 name = "k256"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1393,6 +1399,7 @@ dependencies = [
  "solana-signer",
  "testsvm",
  "testsvm-quasar",
+ "testsvm-quasar-idl",
 ]
 
 [[package]]
@@ -1654,6 +1661,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.150"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -2785,7 +2805,7 @@ dependencies = [
 [[package]]
 name = "testsvm"
 version = "0.4.0"
-source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#775b5eaf54af617b937c8bc26435c022e9c74edd"
+source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#175180c89232265fdb9183171a64d0c7cb688646"
 dependencies = [
  "base64 0.22.1",
  "comfy-table",
@@ -2801,9 +2821,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "testsvm-idl"
+version = "0.1.0"
+source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#175180c89232265fdb9183171a64d0c7cb688646"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "testsvm-quasar"
 version = "0.1.0"
-source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#775b5eaf54af617b937c8bc26435c022e9c74edd"
+source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#175180c89232265fdb9183171a64d0c7cb688646"
 dependencies = [
  "quasar-svm",
  "solana-account",
@@ -2815,6 +2844,16 @@ dependencies = [
  "solana-signer",
  "solana-system-interface 3.2.0",
  "testsvm",
+]
+
+[[package]]
+name = "testsvm-quasar-idl"
+version = "0.1.0"
+source = "git+https://github.com/cds-rs/anchor-litesvm?branch=turbin3#175180c89232265fdb9183171a64d0c7cb688646"
+dependencies = [
+ "quote",
+ "syn 2.0.118",
+ "testsvm-idl",
 ]
 
 [[package]]
@@ -3075,3 +3114,9 @@ dependencies = [
  "quote",
  "syn 2.0.118",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"

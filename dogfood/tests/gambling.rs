@@ -13,8 +13,8 @@
 //! or lose and asserts the table paid out accordingly.
 
 use {
+    quasar_dice_dogfood::client,
     sha2::{Digest, Sha256},
-    solana_instruction::{AccountMeta, Instruction},
     solana_keypair::Keypair,
     solana_pubkey::Pubkey,
     solana_signer::Signer,
@@ -37,9 +37,6 @@ fn dice_id() -> Pubkey {
 }
 fn instructions_sysvar() -> Pubkey {
     Pubkey::from_str("Sysvar1nstructions1111111111111111111111111").unwrap()
-}
-fn system_program() -> Pubkey {
-    Pubkey::from_str("11111111111111111111111111111111").unwrap()
 }
 
 const BANKROLL: u64 = 100_000_000_000;
@@ -111,151 +108,10 @@ fn bet_of(house: &Pubkey, table_seed: u64, player: &Pubkey, id: &Pubkey) -> Pubk
     .0
 }
 
-// --- instruction layouts ([discriminator] ++ packed LE args) ---------------
-
-fn initialize_ix(id: Pubkey, house: Pubkey, vault: Pubkey, amount: u64) -> Instruction {
-    let mut data = vec![0u8];
-    data.extend_from_slice(&amount.to_le_bytes());
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(house, true),
-            AccountMeta::new(vault, false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
-
-fn open_table_ix(
-    id: Pubkey,
-    house: Pubkey,
-    table: Pubkey,
-    table_seed: u64,
-    commitment: [u8; 32],
-) -> Instruction {
-    let mut data = vec![5u8];
-    data.extend_from_slice(&table_seed.to_le_bytes());
-    data.extend_from_slice(&commitment);
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(house, true),
-            AccountMeta::new(table, false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn place_bet_ix(
-    id: Pubkey,
-    player: Pubkey,
-    house: Pubkey,
-    vault: Pubkey,
-    table: Pubkey,
-    bet: Pubkey,
-    table_seed: u64,
-    amount: u64,
-    guess: u8,
-    entropy: [u8; 32],
-) -> Instruction {
-    let mut data = vec![1u8];
-    data.extend_from_slice(&table_seed.to_le_bytes());
-    data.extend_from_slice(&amount.to_le_bytes());
-    data.push(guess);
-    data.extend_from_slice(&entropy);
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(player, true),
-            AccountMeta::new_readonly(house, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new(table, false),
-            AccountMeta::new(bet, false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
-
-fn close_table_ix(id: Pubkey, house: Pubkey, table: Pubkey, table_seed: u64) -> Instruction {
-    let mut data = vec![6u8];
-    data.extend_from_slice(&table_seed.to_le_bytes());
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(house, true),
-            AccountMeta::new(table, false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
-
-fn reveal_ix(id: Pubkey, house: Pubkey, preimage: [u8; 32]) -> Instruction {
-    let mut data = vec![2u8];
-    data.extend_from_slice(&preimage);
-    Instruction {
-        program_id: id,
-        accounts: vec![AccountMeta::new_readonly(house, true)],
-        data,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn resolve_ix(
-    id: Pubkey,
-    house: Pubkey,
-    player: Pubkey,
-    vault: Pubkey,
-    table: Pubkey,
-    bet: Pubkey,
-    table_seed: u64,
-) -> Instruction {
-    let mut data = vec![3u8];
-    data.extend_from_slice(&table_seed.to_le_bytes());
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(house, true),
-            AccountMeta::new(player, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new(table, false),
-            AccountMeta::new(bet, false),
-            AccountMeta::new_readonly(instructions_sysvar(), false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn refund_ix(
-    id: Pubkey,
-    player: Pubkey,
-    house: Pubkey,
-    vault: Pubkey,
-    table: Pubkey,
-    bet: Pubkey,
-    table_seed: u64,
-) -> Instruction {
-    let mut data = vec![4u8];
-    data.extend_from_slice(&table_seed.to_le_bytes());
-    Instruction {
-        program_id: id,
-        accounts: vec![
-            AccountMeta::new(player, true),
-            AccountMeta::new(house, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new(table, false),
-            AccountMeta::new(bet, false),
-            AccountMeta::new_readonly(system_program(), false),
-        ],
-        data,
-    }
-}
+// Instructions are built through the generated `client::*` structs (emitted from
+// the program source by build.rs; see src/lib.rs). The verbs below fill those
+// structs and call `.ix()`; `program_id`, the system program, and the sysvars
+// the client injects are no longer spelled out here.
 
 // --- the gambling DSL ------------------------------------------------------
 
@@ -307,13 +163,27 @@ fn open_table(backend: &mut QuasarBackend, table_seed: u64, preimage: [u8; 32]) 
     let vault = vault_of(&house.pubkey(), &id);
     backend.register_alias(&vault, "Vault");
 
-    let init = backend.send(&[initialize_ix(id, house.pubkey(), vault, BANKROLL)], &[&house]);
+    let init = backend.send(
+        &[client::Initialize {
+            house: house.pubkey(),
+            vault,
+            amount: BANKROLL,
+        }
+        .ix()],
+        &[&house],
+    );
     assert!(init.error.is_none(), "fund vault: {:?}", init.error);
 
     let table = table_of(&house.pubkey(), table_seed, &id);
     backend.register_alias(&table, "Table");
     let tx = backend.send(
-        &[open_table_ix(id, house.pubkey(), table, table_seed, commit(&preimage))],
+        &[client::OpenTable {
+            house: house.pubkey(),
+            table,
+            table_seed,
+            commitment: commit(&preimage),
+        }
+        .ix()],
         &[&house],
     );
     println!(
@@ -337,18 +207,18 @@ fn place_bet(backend: &mut QuasarBackend, table: &Table, player: &Keypair, guess
     let bet = bet_of(&table.house.pubkey(), table.seed, &player.pubkey(), &table.id);
     backend.register_alias(&bet, "Wager");
 
-    let ix = place_bet_ix(
-        table.id,
-        player.pubkey(),
-        table.house.pubkey(),
-        table.vault,
-        table.pubkey,
+    let ix = client::PlaceBet {
+        player: player.pubkey(),
+        house: table.house.pubkey(),
+        vault: table.vault,
+        table: table.pubkey,
         bet,
-        table.seed,
-        STAKE,
-        guess,
-        PLAYER_ENTROPY,
-    );
+        table_seed: table.seed,
+        amount: STAKE,
+        guess_roll: guess,
+        entropy: PLAYER_ENTROPY,
+    }
+    .ix();
     let tx = backend.send(&[ix], &[player]);
     println!(
         "\n=== the player places a bet (guess {guess}) ===\n{}",
@@ -368,16 +238,21 @@ fn reveal_and_settle(
     bet: Pubkey,
     reveal_preimage: &[u8; 32],
 ) -> Transaction {
-    let reveal = reveal_ix(table.id, table.house.pubkey(), *reveal_preimage);
-    let resolve = resolve_ix(
-        table.id,
-        table.house.pubkey(),
-        *player,
-        table.vault,
-        table.pubkey,
+    let reveal = client::Reveal {
+        house: table.house.pubkey(),
+        preimage: *reveal_preimage,
+    }
+    .ix();
+    let resolve = client::ResolveBet {
+        house: table.house.pubkey(),
+        player: *player,
+        vault: table.vault,
+        table: table.pubkey,
         bet,
-        table.seed,
-    );
+        instruction_sysvar: instructions_sysvar(),
+        table_seed: table.seed,
+    }
+    .ix();
     let tx = backend.send(&[reveal, resolve], &[&table.house]);
     println!(
         "\n=== the house reveals and settles ===\n{}",
@@ -501,15 +376,15 @@ fn the_house_never_shows() {
 
     // Time passes; the house never reveals. After the timeout, the player walks.
     backend.warp_to_slot(placed_at + REFUND_TIMEOUT_SLOTS + 1);
-    let ix = refund_ix(
-        table.id,
-        player.pubkey(),
-        table.house.pubkey(),
-        table.vault,
-        table.pubkey,
+    let ix = client::RefundBet {
+        player: player.pubkey(),
+        house: table.house.pubkey(),
+        vault: table.vault,
+        table: table.pubkey,
         bet,
-        table.seed,
-    );
+        table_seed: table.seed,
+    }
+    .ix();
     let tx = backend.send(&[ix], &[&player]);
     println!(
         "\n=== the house never shows; the player walks ===\n{}",
@@ -533,7 +408,12 @@ fn the_house_closes_an_empty_table() {
     let table = open_table(&mut backend, 7, preimage);
     let house_before = lamports(&backend, &table.house.pubkey());
 
-    let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+    let ix = client::CloseTable {
+        house: table.house.pubkey(),
+        table: table.pubkey,
+        table_seed: table.seed,
+    }
+    .ix();
     let tx = backend.send(&[ix], &[&table.house]);
     println!(
         "\n=== the house closes an empty table ===\n{}",
@@ -559,7 +439,12 @@ fn a_close_and_reopen_grind_is_caught() {
     let player = backend.actor("Player", PLAYER_FUNDS);
     let bet = place_bet(&mut backend, &table, &player, 50); // claims the table
 
-    let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+    let ix = client::CloseTable {
+        house: table.house.pubkey(),
+        table: table.pubkey,
+        table_seed: table.seed,
+    }
+    .ix();
     let tx = backend.send(&[ix], &[&table.house]);
     println!("close error: {:?}", tx.error);
     assert!(
@@ -649,15 +534,15 @@ fn deal_the_table_and_report() {
         let placed_at = b.clock().slot;
         let bet = place_bet(&mut b, &table, &player, 50);
         b.warp_to_slot(placed_at + REFUND_TIMEOUT_SLOTS + 1);
-        let ix = refund_ix(
-            table.id,
-            player.pubkey(),
-            table.house.pubkey(),
-            table.vault,
-            table.pubkey,
+        let ix = client::RefundBet {
+            player: player.pubkey(),
+            house: table.house.pubkey(),
+            vault: table.vault,
+            table: table.pubkey,
             bet,
-            table.seed,
-        );
+            table_seed: table.seed,
+        }
+        .ix();
         let tx = b.send(&[ix], &[&player]);
         entries.push(write_page(
             dir,
@@ -675,7 +560,12 @@ fn deal_the_table_and_report() {
         let (preimage, _) = preimage_where(|r| r <= 98);
         let mut b = QuasarBackend::new();
         let table = open_table(&mut b, 7, preimage);
-        let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+        let ix = client::CloseTable {
+        house: table.house.pubkey(),
+        table: table.pubkey,
+        table_seed: table.seed,
+    }
+    .ix();
         let tx = b.send(&[ix], &[&table.house]);
         entries.push(write_page(
             dir,
@@ -694,7 +584,12 @@ fn deal_the_table_and_report() {
         let table = open_table(&mut b, 8, preimage);
         let player = b.actor("Player", PLAYER_FUNDS);
         let _bet = place_bet(&mut b, &table, &player, 50);
-        let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+        let ix = client::CloseTable {
+        house: table.house.pubkey(),
+        table: table.pubkey,
+        table_seed: table.seed,
+    }
+    .ix();
         let tx = b.send(&[ix], &[&table.house]);
         entries.push(write_page(
             dir,

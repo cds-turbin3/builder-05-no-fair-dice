@@ -5,8 +5,9 @@ edition = "2021"
 publish = false
 
 # Drives the Quasar dice game (programs/quasar-dice) through the testsvm-quasar
-# engine, reading the program's ELF from ../programs/quasar-dice. Instructions
-# are hand-built from their flat layouts. Its own lockfile (testsvm-quasar
+# engine, reading the program's ELF from ../programs/quasar-dice. The instruction
+# client is generated at build time straight from the program source (see
+# build.rs): no `quasar idl-build`, no IDL JSON. Its own lockfile (testsvm-quasar
 # carries the full Agave internals).
 
 [lib]
@@ -16,6 +17,11 @@ path = "src/lib.rs"
 testsvm = { git = "https://github.com/cds-rs/anchor-litesvm", branch = "turbin3" }
 solana-pubkey = "3.0"
 solana-instruction = "3.2"
+
+# Codegen runs in build.rs: the source-extractor reads the program source and
+# emits the client (pulls in testsvm-idl for emit_client).
+[build-dependencies]
+testsvm-quasar-idl = { git = "https://github.com/cds-rs/anchor-litesvm", branch = "turbin3" }
 
 [dev-dependencies]
 testsvm-quasar = { git = "https://github.com/cds-rs/anchor-litesvm", branch = "turbin3" }

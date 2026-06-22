@@ -4,7 +4,7 @@
 
 **Outcome.** The transaction failed: `custom program error: 0x4`.
 
-**Source.** [`tests/gambling.rs::a_switched_preimage_is_caught`](../tests/gambling.rs#L467)
+**Source.** [`tests/gambling.rs::a_switched_preimage_is_caught`](../tests/gambling.rs#L342)
 
 ## Structured execution log
 

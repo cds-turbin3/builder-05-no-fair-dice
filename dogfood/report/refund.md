@@ -4,7 +4,7 @@
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L491)
+**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L366)
 
 ## Structured execution log
 
