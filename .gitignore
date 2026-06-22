@@ -1,2 +1,5 @@
 target/
 .DS_Store
+# The client is generated from the program source by build.rs; this scraped IDL
+# is vestigial (kept locally for other tooling, e.g. codama/surfpool).
+idls/
