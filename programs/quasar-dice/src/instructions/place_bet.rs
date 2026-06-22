@@ -26,8 +26,9 @@ pub struct PlaceBet {
     pub vault: UncheckedAccount,
 
     /// The open round. Loading it as `Account<Table>` proves it exists (the house
-    /// has committed); a `place_bet` for an unopened table fails here.
-    #[account(address = Table::seeds(house.address(), table_seed))]
+    /// has committed); a `place_bet` for an unopened table fails here. Claimed
+    /// (made mutable) so the house can no longer close-and-reopen this round.
+    #[account(mut, has_one(house), address = Table::seeds(house.address(), table_seed))]
     pub table: Account<Table>,
 
     #[account(
@@ -51,6 +52,13 @@ impl PlaceBet {
         require!(amount >= MIN_BET_LAMPORTS, DiceError::MinimumBet);
         require!(guess_roll >= MIN_ROLL, DiceError::MinimumRoll);
         require!(guess_roll <= MAX_ROLL, DiceError::MaximumRoll);
+
+        // One bet per table. Claiming it freezes the round: from here the house
+        // can settle (`resolve_bet`) or be timed out (`refund_bet`), but it can no
+        // longer `close_table` and reopen with a substituted commitment.
+        let claimed: bool = self.table.claimed.into();
+        require!(!claimed, DiceError::TableInUse);
+        self.table.claimed = true.into();
 
         let slot = Clock::get()?.slot.get();
 

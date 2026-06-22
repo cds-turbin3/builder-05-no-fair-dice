@@ -11,6 +11,10 @@ use quasar_lang::prelude::*;
 pub struct Table {
     pub house: Address,
     pub commitment: [u8; 32],
+    /// Set true by the first (and only) bet. A claimed table can no longer be
+    /// closed by `close_table`, so the house cannot close-and-reopen it with a
+    /// substituted commitment after seeing the player's entropy.
+    pub claimed: bool,
     pub bump: u8,
 }
 

@@ -5,8 +5,8 @@
 //! recover the preimage and confirm the house signed it.
 //!
 //! Discriminators: initialize 0, place_bet 1, reveal 2, resolve_bet 3,
-//! refund_bet 4, open_table 5. `reveal`'s discriminator (2) is what the
-//! introspection parse checks; keep it in sync with `REVEAL_DISCRIMINATOR`.
+//! refund_bet 4, open_table 5, close_table 6. `reveal`'s discriminator (2) is
+//! what the introspection parse checks; keep it in sync with `REVEAL_DISCRIMINATOR`.
 
 #![no_std]
 // Accounts-struct fields are consumed by the derive macro's generated init / CPI
@@ -111,10 +111,18 @@ mod quasar_dice {
     }
 
     /// Player reclaims a stale, unrevealed bet after the timeout. `table_seed`
-    /// identifies the round. The bet closes to the player.
+    /// identifies the round. The bet and the abandoned table both close.
     #[instruction(discriminator = 4)]
     pub fn refund_bet(ctx: Ctx<RefundBet>, table_seed: u64) -> Result<(), ProgramError> {
         let _ = table_seed;
         ctx.accounts.refund(&ctx.bumps)
+    }
+
+    /// House reclaims a table it opened but that no one bet against. A claimed
+    /// (bet-against) table is rejected; it is retired by settle or refund instead.
+    #[instruction(discriminator = 6)]
+    pub fn close_table(ctx: Ctx<CloseTable>, table_seed: u64) -> Result<(), ProgramError> {
+        let _ = table_seed;
+        ctx.accounts.handle()
     }
 }

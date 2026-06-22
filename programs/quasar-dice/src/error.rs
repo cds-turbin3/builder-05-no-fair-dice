@@ -14,4 +14,6 @@ pub enum DiceError {
     TimeoutNotReached,
     /// The introspected previous instruction was not this program's `reveal`.
     NotReveal,
+    /// `close_table` on a table that already has a bet against it.
+    TableInUse,
 }

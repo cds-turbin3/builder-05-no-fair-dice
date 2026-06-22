@@ -4,14 +4,14 @@
 
 **Outcome.** The transaction failed: `custom program error: 0x4`.
 
-**Source.** [`tests/gambling.rs::a_switched_preimage_is_caught`](../tests/gambling.rs#L448)
+**Source.** [`tests/gambling.rs::a_switched_preimage_is_caught`](../tests/gambling.rs#L467)
 
 ## Structured execution log
 
 ```
-CPI Tree (1,497 BPF CU / 1,400,000 budget):
-├── reveal (42 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet FAILED: CommitRevealMismatch (0x4) (1,455 / 1,399,958 CU) dice (no CPIs)
+CPI Tree (1,529 BPF CU / 1,400,000 budget):
+├── reveal (43 / 1,400,000 CU) dice (no CPIs)
+└── resolve_bet FAILED: CommitRevealMismatch (0x4) (1,486 / 1,399,957 CU) dice (no CPIs)
 ```
 
 ## Sequence diagram
@@ -21,8 +21,8 @@ sequenceDiagram
     autonumber
     participant House
     participant dice
-    House ->> dice: reveal (42cu)
-    House ->> dice: resolve_bet (1455cu)
+    House ->> dice: reveal (43cu)
+    House ->> dice: resolve_bet (1486cu)
     rect rgb(255, 220, 220)
     note over dice: ✗ CommitRevealMismatch (0x4)
     end

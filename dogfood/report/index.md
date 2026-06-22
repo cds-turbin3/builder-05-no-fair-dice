@@ -8,3 +8,5 @@ Every scenario the dice game plays through the testsvm-quasar engine. Each page 
 | The house keeps a losing roll | succeeded | [page](losing-roll.md) |
 | A switched preimage is caught | failed | [page](switched-preimage.md) |
 | The house never shows | succeeded | [page](refund.md) |
+| The house closes an empty table | succeeded | [page](close-empty-table.md) |
+| A close-and-reopen grind is caught | failed | [page](grind-caught.md) |

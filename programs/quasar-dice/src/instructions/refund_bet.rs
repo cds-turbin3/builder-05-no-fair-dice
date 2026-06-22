@@ -6,7 +6,7 @@ use {
     crate::{
         constants::REFUND_TIMEOUT_SLOTS,
         error::DiceError,
-        state::{Bet, VaultPda},
+        state::{Bet, Table, VaultPda},
     },
     quasar_lang::{cpi::Seed, prelude::*, sysvars::Sysvar},
 };
@@ -17,10 +17,22 @@ pub struct RefundBet {
     #[account(mut)]
     pub player: Signer,
 
+    /// Writable: receives the abandoned table's rent on close.
+    #[account(mut)]
     pub house: UncheckedAccount,
 
     #[account(mut, address = VaultPda::seeds(house.address()))]
     pub vault: UncheckedAccount,
+
+    /// The abandoned round, closed back to the house: the house never revealed,
+    /// so the table is done.
+    #[account(
+        mut,
+        has_one(house),
+        close(dest = house),
+        address = Table::seeds(house.address(), table_seed)
+    )]
+    pub table: Account<Table>,
 
     #[account(
         mut,

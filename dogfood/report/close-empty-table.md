@@ -1,17 +1,16 @@
-# The house keeps a losing roll
+# The house closes an empty table
 
-**Intent.** A guess that ties the roll loses. The settle introspects the reveal, finds no win, and the stake stays with the house.
+**Intent.** A table opened but never bet against. The house reclaims its rent with `close_table`.
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_keeps_a_losing_roll`](../tests/gambling.rs#L439)
+**Source.** [`tests/gambling.rs::the_house_closes_an_empty_table`](../tests/gambling.rs#L529)
 
 ## Structured execution log
 
 ```
-CPI Tree (1,929 BPF CU / 1,400,000 budget):
-├── reveal (43 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet (1,886 / 1,399,957 CU) dice (no CPIs)
+CPI Tree (371 BPF CU / 1,400,000 budget):
+└── close_table (371 / 1,400,000 CU) dice (no CPIs)
 ```
 
 ## Sequence diagram
@@ -21,8 +20,7 @@ sequenceDiagram
     autonumber
     participant House
     participant dice
-    House ->> dice: reveal (43cu)
-    House ->> dice: resolve_bet (1886cu)
+    House ->> dice: close_table (371cu)
 ```
 
 ## Authority graph
@@ -36,15 +34,9 @@ flowchart LR
     classDef writable fill:#fff3cd,stroke:#ffc107;
     dice[dice]:::program
     House([House]):::signer
-    Player[(Player)]:::writable
-    Vault[(Vault)]:::writable
     Table[(Table)]:::writable
-    Wager[(Wager)]:::writable
     House -->|signs| dice
-    dice -->|writes| Player
-    dice -->|writes| Vault
     dice -->|writes| Table
-    dice -->|writes| Wager
 ```
 
 ## Ownership graph
@@ -57,13 +49,7 @@ flowchart LR
     classDef account fill:#fff3cd,stroke:#ffc107;
     System[System]:::owner
     House[(House)]:::account
-    Player[(Player)]:::account
-    Vault[(Vault)]:::account
     Table[(Table)]:::account
-    Wager[(Wager)]:::account
     System -->|owns| House
-    System -->|owns| Player
-    System -->|owns| Vault
     System -->|owns| Table
-    System -->|owns| Wager
 ```

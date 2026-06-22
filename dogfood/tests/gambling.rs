@@ -172,8 +172,22 @@ fn place_bet_ix(
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(house, false),
             AccountMeta::new(vault, false),
-            AccountMeta::new_readonly(table, false),
+            AccountMeta::new(table, false),
             AccountMeta::new(bet, false),
+            AccountMeta::new_readonly(system_program(), false),
+        ],
+        data,
+    }
+}
+
+fn close_table_ix(id: Pubkey, house: Pubkey, table: Pubkey, table_seed: u64) -> Instruction {
+    let mut data = vec![6u8];
+    data.extend_from_slice(&table_seed.to_le_bytes());
+    Instruction {
+        program_id: id,
+        accounts: vec![
+            AccountMeta::new(house, true),
+            AccountMeta::new(table, false),
             AccountMeta::new_readonly(system_program(), false),
         ],
         data,
@@ -217,11 +231,13 @@ fn resolve_ix(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn refund_ix(
     id: Pubkey,
     player: Pubkey,
     house: Pubkey,
     vault: Pubkey,
+    table: Pubkey,
     bet: Pubkey,
     table_seed: u64,
 ) -> Instruction {
@@ -231,8 +247,9 @@ fn refund_ix(
         program_id: id,
         accounts: vec![
             AccountMeta::new(player, true),
-            AccountMeta::new_readonly(house, false),
+            AccountMeta::new(house, false),
             AccountMeta::new(vault, false),
+            AccountMeta::new(table, false),
             AccountMeta::new(bet, false),
             AccountMeta::new_readonly(system_program(), false),
         ],
@@ -271,6 +288,7 @@ fn open_table(backend: &mut QuasarBackend, table_seed: u64, preimage: [u8; 32]) 
         (3, "resolve_bet"),
         (4, "refund_bet"),
         (5, "open_table"),
+        (6, "close_table"),
     ] {
         backend.register_instruction_name(&id, &[disc], name);
     }
@@ -280,6 +298,7 @@ fn open_table(backend: &mut QuasarBackend, table_seed: u64, preimage: [u8; 32]) 
         (5, "Overflow"),
         (6, "TimeoutNotReached"),
         (7, "NotReveal"),
+        (8, "TableInUse"),
     ] {
         backend.register_error_name(&id, code, name);
     }
@@ -487,6 +506,7 @@ fn the_house_never_shows() {
         player.pubkey(),
         table.house.pubkey(),
         table.vault,
+        table.pubkey,
         bet,
         table.seed,
     );
@@ -503,6 +523,54 @@ fn the_house_never_shows() {
         "the player is made whole"
     );
     assert_eq!(lamports(&backend, &bet), 0, "the wager is closed");
+}
+
+#[test]
+fn the_house_closes_an_empty_table() {
+    // A table opened but never bet against: the house reclaims its rent.
+    let (preimage, _) = preimage_where(|r| r <= 98);
+    let mut backend = QuasarBackend::new();
+    let table = open_table(&mut backend, 7, preimage);
+    let house_before = lamports(&backend, &table.house.pubkey());
+
+    let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+    let tx = backend.send(&[ix], &[&table.house]);
+    println!(
+        "\n=== the house closes an empty table ===\n{}",
+        tx.pretty_cpi_tree()
+    );
+    assert!(tx.error.is_none(), "close an empty table: {:?}", tx.error);
+    assert_eq!(lamports(&backend, &table.pubkey), 0, "the table is closed");
+    assert!(
+        lamports(&backend, &table.house.pubkey()) > house_before,
+        "the table's rent returned to the house"
+    );
+}
+
+#[test]
+fn a_close_and_reopen_grind_is_caught() {
+    // Once a player has bet, the house must not be able to close the table and
+    // reopen it with a commitment ground against the now-visible entropy. The
+    // claim guard rejects the close, so that substitution is impossible.
+    let (preimage, _) = preimage_where(|r| r <= 98);
+    let mut backend = QuasarBackend::new();
+    let table = open_table(&mut backend, 8, preimage);
+
+    let player = backend.actor("Player", PLAYER_FUNDS);
+    let bet = place_bet(&mut backend, &table, &player, 50); // claims the table
+
+    let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+    let tx = backend.send(&[ix], &[&table.house]);
+    println!("close error: {:?}", tx.error);
+    assert!(
+        tx.error.is_some(),
+        "a claimed table cannot be closed (TableInUse), so the house cannot reopen to grind"
+    );
+    assert!(
+        lamports(&backend, &table.pubkey) > 0,
+        "the table survives the rejected close"
+    );
+    assert!(lamports(&backend, &bet) > 0, "the wager survives");
 }
 
 /// Replays each scenario and renders its decisive transaction to a crime-scene
@@ -586,6 +654,7 @@ fn deal_the_table_and_report() {
             player.pubkey(),
             table.house.pubkey(),
             table.vault,
+            table.pubkey,
             bet,
             table.seed,
         );
@@ -597,6 +666,44 @@ fn deal_the_table_and_report() {
             "The house never reveals. After the timeout the player reclaims the stake and the \
              wager closes.",
             "the_house_never_shows",
+            &tx,
+        ));
+    }
+
+    // The house closes an empty table.
+    {
+        let (preimage, _) = preimage_where(|r| r <= 98);
+        let mut b = QuasarBackend::new();
+        let table = open_table(&mut b, 7, preimage);
+        let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+        let tx = b.send(&[ix], &[&table.house]);
+        entries.push(write_page(
+            dir,
+            "close-empty-table.md",
+            "The house closes an empty table",
+            "A table opened but never bet against. The house reclaims its rent with `close_table`.",
+            "the_house_closes_an_empty_table",
+            &tx,
+        ));
+    }
+
+    // A close-and-reopen grind is caught.
+    {
+        let (preimage, _) = preimage_where(|r| r <= 98);
+        let mut b = QuasarBackend::new();
+        let table = open_table(&mut b, 8, preimage);
+        let player = b.actor("Player", PLAYER_FUNDS);
+        let _bet = place_bet(&mut b, &table, &player, 50);
+        let ix = close_table_ix(table.id, table.house.pubkey(), table.pubkey, table.seed);
+        let tx = b.send(&[ix], &[&table.house]);
+        entries.push(write_page(
+            dir,
+            "grind-caught.md",
+            "A close-and-reopen grind is caught",
+            "Once a player has bet, the table is claimed. The house's attempt to close it (to \
+             reopen with a substituted commitment after seeing the entropy) is rejected with \
+             `TableInUse`.",
+            "a_close_and_reopen_grind_is_caught",
             &tx,
         ));
     }

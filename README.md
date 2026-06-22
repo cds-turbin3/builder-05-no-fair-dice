@@ -16,7 +16,7 @@ An LLM came in handy to investigate and prototype the instruction introspection 
 
 ## The table
 
-Six instructions, played as a table:
+Seven instructions, played as a table:
 
 | # | Instruction   | Who signs | What happens |
 |---|---------------|-----------|--------------|
@@ -26,11 +26,18 @@ Six instructions, played as a table:
 | 2 | `reveal`      | house     | a marker carrying the preimage (see below) |
 | 3 | `resolve_bet` | house     | settles the bet; pays a winner from the vault |
 | 4 | `refund_bet`  | player    | reclaims a stale, never-revealed bet after a timeout |
+| 6 | `close_table` | house     | reclaims a table opened but never bet against |
 
 The vault is a PDA at `["vault", house]`; it holds the bankroll and signs payouts with
 `invoke_signed`. A round lives in a Table PDA at `["table", house, table_seed]` (the house's
 posted commitment), and each bet is a PDA at `["bet", house, table_seed, player]`. The bet
-closes to the player on settle or refund; the table closes to the house on settle.
+closes to the player on settle or refund; the table closes to the house on settle (or refund),
+or to `close_table` if no bet ever came.
+
+A table is **claimed** by its first bet, and a claimed table cannot be closed. That guard
+matters: without it the house could close a live round and reopen it (same seed) with a
+commitment ground to lose against the player's now-visible entropy. So `close_table` only ever
+reclaims a round nobody played; a claimed round is retired by settle or refund.
 
 ## How the randomness works
 
@@ -160,14 +167,14 @@ transaction; `resolve_bet` introspects the preceding `reveal` and pays out.
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](dogfood/tests/gambling.rs#L397)
+**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](dogfood/tests/gambling.rs#L416)
 
 ### Structured execution log
 
 ```
-CPI Tree (3,452 BPF CU / 1,400,000 budget):
-├── reveal (42 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet (3,410 / 1,399,958 CU) dice
+CPI Tree (3,485 BPF CU / 1,400,000 budget):
+├── reveal (43 / 1,400,000 CU) dice (no CPIs)
+└── resolve_bet (3,442 / 1,399,957 CU) dice
     └── System
 ```
 
@@ -182,8 +189,8 @@ sequenceDiagram
     participant House
     participant dice
     participant System
-    House ->> dice: reveal (42cu)
-    House ->> dice: resolve_bet (3410cu)
+    House ->> dice: reveal (43cu)
+    House ->> dice: resolve_bet (3442cu)
     dice ->> System: Transfer
 ```
 

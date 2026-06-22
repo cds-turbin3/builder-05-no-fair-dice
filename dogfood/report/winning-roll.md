@@ -4,14 +4,14 @@
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](../tests/gambling.rs#L397)
+**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](../tests/gambling.rs#L416)
 
 ## Structured execution log
 
 ```
-CPI Tree (3,452 BPF CU / 1,400,000 budget):
-├── reveal (42 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet (3,410 / 1,399,958 CU) dice
+CPI Tree (3,485 BPF CU / 1,400,000 budget):
+├── reveal (43 / 1,400,000 CU) dice (no CPIs)
+└── resolve_bet (3,442 / 1,399,957 CU) dice
     └── System
 ```
 
@@ -23,8 +23,8 @@ sequenceDiagram
     participant House
     participant dice
     participant System
-    House ->> dice: reveal (42cu)
-    House ->> dice: resolve_bet (3410cu)
+    House ->> dice: reveal (43cu)
+    House ->> dice: resolve_bet (3442cu)
     dice ->> System: Transfer
 ```
 

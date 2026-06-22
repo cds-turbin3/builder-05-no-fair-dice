@@ -4,13 +4,13 @@
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L472)
+**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L491)
 
 ## Structured execution log
 
 ```
-CPI Tree (2,033 BPF CU / 1,400,000 budget):
-└── refund_bet (2,033 / 1,400,000 CU) dice
+CPI Tree (2,461 BPF CU / 1,400,000 budget):
+└── refund_bet (2,461 / 1,400,000 CU) dice
     └── System
 ```
 
@@ -22,7 +22,7 @@ sequenceDiagram
     participant Player
     participant dice
     participant System
-    Player ->> dice: refund_bet (2033cu)
+    Player ->> dice: refund_bet (2461cu)
     dice ->> System: Transfer
 ```
 
@@ -37,12 +37,16 @@ flowchart LR
     classDef writable fill:#fff3cd,stroke:#ffc107;
     dice[dice]:::program
     Player([Player]):::signer
+    House[(House)]:::writable
     Vault([Vault]):::signer
+    Table[(Table)]:::writable
     Wager[(Wager)]:::writable
     System[System]:::program
     Player -->|signs| dice
     Vault -->|signs| System
+    dice -->|writes| House
     dice -->|writes| Vault
+    dice -->|writes| Table
     dice -->|writes| Wager
     System -->|writes| Player
 ```
@@ -57,9 +61,13 @@ flowchart LR
     classDef account fill:#fff3cd,stroke:#ffc107;
     System[System]:::owner
     Player[(Player)]:::account
+    House[(House)]:::account
     Vault[(Vault)]:::account
+    Table[(Table)]:::account
     Wager[(Wager)]:::account
     System -->|owns| Player
+    System -->|owns| House
     System -->|owns| Vault
+    System -->|owns| Table
     System -->|owns| Wager
 ```

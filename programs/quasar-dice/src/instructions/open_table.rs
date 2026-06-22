@@ -25,6 +25,7 @@ impl OpenTable {
         self.table.set_inner(TableInner {
             house: *self.house.address(),
             commitment,
+            claimed: false,
             bump: bumps.table,
         });
         Ok(())
