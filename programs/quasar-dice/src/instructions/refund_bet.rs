@@ -1,6 +1,6 @@
 //! The player reclaims a stale bet the house never revealed. After
-//! `REFUND_TIMEOUT_SLOTS`, the stake returns from the vault and the Bet is
-//! closed to the player.
+//! `REFUND_TIMEOUT_SLOTS`, the stake returns from the vault and the Bet closes.
+//! The table is left for the house to settle or clean up.
 
 use {
     crate::{
@@ -12,7 +12,7 @@ use {
 };
 
 #[derive(Accounts)]
-#[instruction(seed: u64)]
+#[instruction(table_seed: u64)]
 pub struct RefundBet {
     #[account(mut)]
     pub player: Signer,
@@ -26,7 +26,7 @@ pub struct RefundBet {
         mut,
         has_one(player),
         close(dest = player),
-        address = Bet::seeds(vault.address(), player.address(), seed)
+        address = Bet::seeds(house.address(), table_seed, player.address())
     )]
     pub bet: Account<Bet>,
 

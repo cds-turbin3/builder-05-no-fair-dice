@@ -4,14 +4,13 @@
 //! `resolve_bet` reads the preceding `reveal` out of the Instructions sysvar to
 //! recover the preimage and confirm the house signed it. So the settle verb is a
 //! single transaction carrying TWO instructions, `[reveal, resolve_bet]`, and the
-//! whole point of this suite is to prove that parse works on a live engine, not
-//! just byte-exact on paper.
+//! whole point of this suite is to prove that parse works on a live engine.
 //!
-//! The vocabulary is the game: the house `opens the table` (seeds its vault), a
-//! player `places a bet` (commits a stake against `sha256(preimage)`), the house
-//! `reveals and settles`, or the player `walks` when the house never shows. The
-//! roll is derived host-side too, so each scenario picks a guess that is meant to
-//! win or lose and then asserts the table paid out accordingly.
+//! The commitment is on-chain: the house `opens the table` (funds the vault and
+//! posts `sha256(preimage)`), then a player `places a bet` against that open
+//! table, the house `reveals and settles`, or the player `walks` after a timeout.
+//! The roll is derived host-side too, so each scenario picks a guess meant to win
+//! or lose and asserts the table paid out accordingly.
 
 use {
     sha2::{Digest, Sha256},
@@ -33,8 +32,6 @@ const DICE_SO: &str = concat!(
     "/../programs/quasar-dice/target/deploy/quasar_dice.so"
 );
 
-/// The dice program's `declare_id!`; the deploy address must match so its PDAs
-/// derive against it.
 fn dice_id() -> Pubkey {
     Pubkey::from_str("8hjbFtnfY87ZzpEpx26u5tx4KjxkrqiWGUEcWFbDNn7h").unwrap()
 }
@@ -56,7 +53,7 @@ const PLAYER_ENTROPY: [u8; 32] = [0x5a; 32];
 
 // --- the odds (mirrors the program's roll derivation) ----------------------
 
-/// `sha256(preimage)`, the commitment a bet locks in.
+/// `sha256(preimage)`, the commitment the house posts when it opens a table.
 fn commit(preimage: &[u8; 32]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(preimage);
@@ -94,13 +91,20 @@ fn preimage_where(want: impl Fn(u8) -> bool) -> ([u8; 32], u8) {
 fn vault_of(house: &Pubkey, id: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(&[b"vault", house.as_ref()], id).0
 }
-fn bet_of(vault: &Pubkey, player: &Pubkey, seed: u64, id: &Pubkey) -> Pubkey {
+fn table_of(house: &Pubkey, table_seed: u64, id: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[b"table", house.as_ref(), table_seed.to_le_bytes().as_ref()],
+        id,
+    )
+    .0
+}
+fn bet_of(house: &Pubkey, table_seed: u64, player: &Pubkey, id: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[
             b"bet",
-            vault.as_ref(),
+            house.as_ref(),
+            table_seed.to_le_bytes().as_ref(),
             player.as_ref(),
-            seed.to_le_bytes().as_ref(),
         ],
         id,
     )
@@ -123,24 +127,44 @@ fn initialize_ix(id: Pubkey, house: Pubkey, vault: Pubkey, amount: u64) -> Instr
     }
 }
 
+fn open_table_ix(
+    id: Pubkey,
+    house: Pubkey,
+    table: Pubkey,
+    table_seed: u64,
+    commitment: [u8; 32],
+) -> Instruction {
+    let mut data = vec![5u8];
+    data.extend_from_slice(&table_seed.to_le_bytes());
+    data.extend_from_slice(&commitment);
+    Instruction {
+        program_id: id,
+        accounts: vec![
+            AccountMeta::new(house, true),
+            AccountMeta::new(table, false),
+            AccountMeta::new_readonly(system_program(), false),
+        ],
+        data,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn place_bet_ix(
     id: Pubkey,
     player: Pubkey,
     house: Pubkey,
     vault: Pubkey,
+    table: Pubkey,
     bet: Pubkey,
-    seed: u64,
+    table_seed: u64,
     amount: u64,
     guess: u8,
-    commitment: [u8; 32],
     entropy: [u8; 32],
 ) -> Instruction {
     let mut data = vec![1u8];
-    data.extend_from_slice(&seed.to_le_bytes());
+    data.extend_from_slice(&table_seed.to_le_bytes());
     data.extend_from_slice(&amount.to_le_bytes());
     data.push(guess);
-    data.extend_from_slice(&commitment);
     data.extend_from_slice(&entropy);
     Instruction {
         program_id: id,
@@ -148,6 +172,7 @@ fn place_bet_ix(
             AccountMeta::new(player, true),
             AccountMeta::new_readonly(house, false),
             AccountMeta::new(vault, false),
+            AccountMeta::new_readonly(table, false),
             AccountMeta::new(bet, false),
             AccountMeta::new_readonly(system_program(), false),
         ],
@@ -165,22 +190,25 @@ fn reveal_ix(id: Pubkey, house: Pubkey, preimage: [u8; 32]) -> Instruction {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_ix(
     id: Pubkey,
     house: Pubkey,
     player: Pubkey,
     vault: Pubkey,
+    table: Pubkey,
     bet: Pubkey,
-    seed: u64,
+    table_seed: u64,
 ) -> Instruction {
     let mut data = vec![3u8];
-    data.extend_from_slice(&seed.to_le_bytes());
+    data.extend_from_slice(&table_seed.to_le_bytes());
     Instruction {
         program_id: id,
         accounts: vec![
             AccountMeta::new(house, true),
             AccountMeta::new(player, false),
             AccountMeta::new(vault, false),
+            AccountMeta::new(table, false),
             AccountMeta::new(bet, false),
             AccountMeta::new_readonly(instructions_sysvar(), false),
             AccountMeta::new_readonly(system_program(), false),
@@ -195,10 +223,10 @@ fn refund_ix(
     house: Pubkey,
     vault: Pubkey,
     bet: Pubkey,
-    seed: u64,
+    table_seed: u64,
 ) -> Instruction {
     let mut data = vec![4u8];
-    data.extend_from_slice(&seed.to_le_bytes());
+    data.extend_from_slice(&table_seed.to_le_bytes());
     Instruction {
         program_id: id,
         accounts: vec![
@@ -214,15 +242,21 @@ fn refund_ix(
 
 // --- the gambling DSL ------------------------------------------------------
 
-/// A house with a funded vault, ready to take bets.
+/// An open round: a funded house with a posted commitment, ready to take a bet.
 struct Table {
     id: Pubkey,
     house: Keypair,
     vault: Pubkey,
+    seed: u64,
+    pubkey: Pubkey,
+    /// The house's secret, revealed at settle. `commit(preimage)` is what the
+    /// table posted on-chain.
+    preimage: [u8; 32],
 }
 
-/// The house opens the table and seeds its vault with the bankroll.
-fn open_table(backend: &mut QuasarBackend) -> Table {
+/// The house funds its vault and opens a table by posting `sha256(preimage)`
+/// on-chain — the commit, before any bet exists.
+fn open_table(backend: &mut QuasarBackend, table_seed: u64, preimage: [u8; 32]) -> Table {
     let id = dice_id();
     backend.deploy_from_file(&id, DICE_SO, "dice");
 
@@ -236,6 +270,7 @@ fn open_table(backend: &mut QuasarBackend) -> Table {
         (2, "reveal"),
         (3, "resolve_bet"),
         (4, "refund_bet"),
+        (5, "open_table"),
     ] {
         backend.register_instruction_name(&id, &[disc], name);
     }
@@ -253,31 +288,34 @@ fn open_table(backend: &mut QuasarBackend) -> Table {
     let vault = vault_of(&house.pubkey(), &id);
     backend.register_alias(&vault, "Vault");
 
-    let ix = initialize_ix(id, house.pubkey(), vault, BANKROLL);
-    let tx = backend.send(&[ix], &[&house]);
-    println!("\n=== the house opens the table ===\n{}", tx.pretty_cpi_tree());
-    assert!(tx.error.is_none(), "open table: {:?}", tx.error);
-    assert_eq!(
-        backend.get_account(&vault).map(|a| a.lamports),
-        Some(BANKROLL),
-        "the vault holds the bankroll"
-    );
+    let init = backend.send(&[initialize_ix(id, house.pubkey(), vault, BANKROLL)], &[&house]);
+    assert!(init.error.is_none(), "fund vault: {:?}", init.error);
 
-    Table { id, house, vault }
+    let table = table_of(&house.pubkey(), table_seed, &id);
+    backend.register_alias(&table, "Table");
+    let tx = backend.send(
+        &[open_table_ix(id, house.pubkey(), table, table_seed, commit(&preimage))],
+        &[&house],
+    );
+    println!(
+        "\n=== the house opens the table (commits sha256(preimage)) ===\n{}",
+        tx.pretty_cpi_tree()
+    );
+    assert!(tx.error.is_none(), "open table: {:?}", tx.error);
+
+    Table {
+        id,
+        house,
+        vault,
+        seed: table_seed,
+        pubkey: table,
+        preimage,
+    }
 }
 
-/// A player commits a stake against `sha256(preimage)` with a chosen guess.
-/// Returns the wager PDA.
-#[allow(clippy::too_many_arguments)]
-fn place_bet(
-    backend: &mut QuasarBackend,
-    table: &Table,
-    player: &Keypair,
-    seed: u64,
-    guess: u8,
-    preimage: &[u8; 32],
-) -> Pubkey {
-    let bet = bet_of(&table.vault, &player.pubkey(), seed, &table.id);
+/// A player bets against the open table with a chosen guess.
+fn place_bet(backend: &mut QuasarBackend, table: &Table, player: &Keypair, guess: u8) -> Pubkey {
+    let bet = bet_of(&table.house.pubkey(), table.seed, &player.pubkey(), &table.id);
     backend.register_alias(&bet, "Wager");
 
     let ix = place_bet_ix(
@@ -285,11 +323,11 @@ fn place_bet(
         player.pubkey(),
         table.house.pubkey(),
         table.vault,
+        table.pubkey,
         bet,
-        seed,
+        table.seed,
         STAKE,
         guess,
-        commit(preimage),
         PLAYER_ENTROPY,
     );
     let tx = backend.send(&[ix], &[player]);
@@ -301,19 +339,26 @@ fn place_bet(
     bet
 }
 
-/// The house reveals the preimage and settles in one transaction:
-/// `[reveal, resolve_bet]`. resolve_bet introspects the reveal. This is the verb
-/// the whole suite exists to exercise.
+/// The house reveals `reveal_preimage` and settles in one transaction:
+/// `[reveal, resolve_bet]`. resolve_bet introspects the reveal. Pass
+/// `table.preimage` for an honest settle, or a different value to forge one.
 fn reveal_and_settle(
     backend: &mut QuasarBackend,
     table: &Table,
     player: &Pubkey,
     bet: Pubkey,
-    seed: u64,
-    preimage: &[u8; 32],
+    reveal_preimage: &[u8; 32],
 ) -> Transaction {
-    let reveal = reveal_ix(table.id, table.house.pubkey(), *preimage);
-    let resolve = resolve_ix(table.id, table.house.pubkey(), *player, table.vault, bet, seed);
+    let reveal = reveal_ix(table.id, table.house.pubkey(), *reveal_preimage);
+    let resolve = resolve_ix(
+        table.id,
+        table.house.pubkey(),
+        *player,
+        table.vault,
+        table.pubkey,
+        bet,
+        table.seed,
+    );
     let tx = backend.send(&[reveal, resolve], &[&table.house]);
     println!(
         "\n=== the house reveals and settles ===\n{}",
@@ -327,8 +372,7 @@ fn lamports(backend: &QuasarBackend, pk: &Pubkey) -> u64 {
 }
 
 /// Render one scenario's decisive transaction to a crime-scene page and return
-/// its index row. The page carries the structured log, sequence diagram, and the
-/// authority + ownership graphs the program's own pass/fail cannot show.
+/// its index row.
 fn write_page(
     dir: &str,
     file: &str,
@@ -351,22 +395,18 @@ fn write_page(
 
 #[test]
 fn the_house_pays_a_winning_roll() {
+    let (preimage, roll) = preimage_where(|r| r <= 98);
     let mut backend = QuasarBackend::new();
-    let table = open_table(&mut backend);
+    let table = open_table(&mut backend, 1, preimage);
 
     let player = backend.actor("Player", PLAYER_FUNDS);
     let player_start = lamports(&backend, &player.pubkey());
 
-    // A roll the player can beat: guess one above it.
-    let (preimage, roll) = preimage_where(|r| r <= 98);
-    let guess = roll + 1;
-    let seed = 1;
-
-    let bet = place_bet(&mut backend, &table, &player, seed, guess, &preimage);
-    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, seed, &preimage);
+    let guess = roll + 1; // beat the roll
+    let bet = place_bet(&mut backend, &table, &player, guess);
+    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, &table.preimage);
     assert!(tx.error.is_none(), "settle a winner: {:?}", tx.error);
 
-    // payout = stake * (10000 - 150) / (guess - 1) / 100; rent nets out on close.
     let payout = (STAKE as u128 * (10_000 - 150) / (guess as u128 - 1) / 100) as u64;
     assert_eq!(
         lamports(&backend, &player.pubkey()),
@@ -378,20 +418,17 @@ fn the_house_pays_a_winning_roll() {
 
 #[test]
 fn the_house_keeps_a_losing_roll() {
+    let (preimage, roll) = preimage_where(|r| (1..=99).contains(&r));
     let mut backend = QuasarBackend::new();
-    let table = open_table(&mut backend);
+    let table = open_table(&mut backend, 2, preimage);
 
     let player = backend.actor("Player", PLAYER_FUNDS);
     let player_start = lamports(&backend, &player.pubkey());
     let vault_start = lamports(&backend, &table.vault);
 
-    // A guess that ties the roll loses; the house wins ties.
-    let (preimage, roll) = preimage_where(|r| (1..=99).contains(&r));
-    let guess = roll;
-    let seed = 2;
-
-    let bet = place_bet(&mut backend, &table, &player, seed, guess, &preimage);
-    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, seed, &preimage);
+    let guess = roll; // a tie loses; the house wins ties
+    let bet = place_bet(&mut backend, &table, &player, guess);
+    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, &table.preimage);
     assert!(tx.error.is_none(), "settle a loser: {:?}", tx.error);
 
     assert_eq!(
@@ -409,19 +446,17 @@ fn the_house_keeps_a_losing_roll() {
 
 #[test]
 fn a_switched_preimage_is_caught() {
+    let (preimage, _) = preimage_where(|r| r <= 98);
     let mut backend = QuasarBackend::new();
-    let table = open_table(&mut backend);
+    let table = open_table(&mut backend, 3, preimage);
 
     let player = backend.actor("Player", PLAYER_FUNDS);
+    let bet = place_bet(&mut backend, &table, &player, 50);
 
-    // The player commits to one preimage; the house tries to reveal another.
-    let (committed, _) = preimage_where(|r| r <= 98);
-    let mut switched = committed;
+    // The house tries to reveal a preimage that does not open the commitment.
+    let mut switched = table.preimage;
     switched[0] ^= 0xff;
-    let seed = 3;
-
-    let bet = place_bet(&mut backend, &table, &player, seed, 50, &committed);
-    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, seed, &switched);
+    let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, &switched);
     println!("settle error: {:?}", tx.error);
     assert!(
         tx.error.is_some(),
@@ -435,16 +470,15 @@ fn a_switched_preimage_is_caught() {
 
 #[test]
 fn the_house_never_shows() {
+    let (preimage, _) = preimage_where(|r| r <= 98);
     let mut backend = QuasarBackend::new();
-    let table = open_table(&mut backend);
+    let table = open_table(&mut backend, 4, preimage);
 
     let player = backend.actor("Player", PLAYER_FUNDS);
     let player_start = lamports(&backend, &player.pubkey());
 
-    let (preimage, _) = preimage_where(|r| r <= 98);
-    let seed = 4;
     let placed_at = backend.clock().slot;
-    let bet = place_bet(&mut backend, &table, &player, seed, 50, &preimage);
+    let bet = place_bet(&mut backend, &table, &player, 50);
 
     // Time passes; the house never reveals. After the timeout, the player walks.
     backend.warp_to_slot(placed_at + REFUND_TIMEOUT_SLOTS + 1);
@@ -454,7 +488,7 @@ fn the_house_never_shows() {
         table.house.pubkey(),
         table.vault,
         bet,
-        seed,
+        table.seed,
     );
     let tx = backend.send(&[ix], &[&player]);
     println!(
@@ -472,23 +506,21 @@ fn the_house_never_shows() {
 }
 
 /// Replays each scenario and renders its decisive transaction to a crime-scene
-/// page under `report/`, plus an index. The settle pages are the showcase: the
-/// sequence diagram and CPI tree show `resolve_bet` reaching back to the `reveal`
-/// it introspects, which a boolean `is_ok()` never could.
+/// page under `report/`, plus an index.
 #[test]
 fn deal_the_table_and_report() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/report");
     std::fs::create_dir_all(dir).unwrap();
     let mut entries: Vec<(String, String, String)> = vec![];
 
-    // The house pays a winning roll: the settle introspects the reveal and pays.
+    // The house pays a winning roll.
     {
-        let mut b = QuasarBackend::new();
-        let table = open_table(&mut b);
-        let player = b.actor("Player", PLAYER_FUNDS);
         let (preimage, roll) = preimage_where(|r| r <= 98);
-        let bet = place_bet(&mut b, &table, &player, 1, roll + 1, &preimage);
-        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, 1, &preimage);
+        let mut b = QuasarBackend::new();
+        let table = open_table(&mut b, 1, preimage);
+        let player = b.actor("Player", PLAYER_FUNDS);
+        let bet = place_bet(&mut b, &table, &player, roll + 1);
+        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &table.preimage);
         entries.push(write_page(
             dir,
             "winning-roll.md",
@@ -500,14 +532,14 @@ fn deal_the_table_and_report() {
         ));
     }
 
-    // The house keeps a losing roll: a tie loses; the stake stays.
+    // The house keeps a losing roll.
     {
-        let mut b = QuasarBackend::new();
-        let table = open_table(&mut b);
-        let player = b.actor("Player", PLAYER_FUNDS);
         let (preimage, roll) = preimage_where(|r| (1..=99).contains(&r));
-        let bet = place_bet(&mut b, &table, &player, 2, roll, &preimage);
-        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, 2, &preimage);
+        let mut b = QuasarBackend::new();
+        let table = open_table(&mut b, 2, preimage);
+        let player = b.actor("Player", PLAYER_FUNDS);
+        let bet = place_bet(&mut b, &table, &player, roll);
+        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &table.preimage);
         entries.push(write_page(
             dir,
             "losing-roll.md",
@@ -519,35 +551,35 @@ fn deal_the_table_and_report() {
         ));
     }
 
-    // A switched preimage is caught: the commitment does not open.
+    // A switched preimage is caught.
     {
+        let (preimage, _) = preimage_where(|r| r <= 98);
         let mut b = QuasarBackend::new();
-        let table = open_table(&mut b);
+        let table = open_table(&mut b, 3, preimage);
         let player = b.actor("Player", PLAYER_FUNDS);
-        let (committed, _) = preimage_where(|r| r <= 98);
-        let mut switched = committed;
+        let bet = place_bet(&mut b, &table, &player, 50);
+        let mut switched = table.preimage;
         switched[0] ^= 0xff;
-        let bet = place_bet(&mut b, &table, &player, 3, 50, &committed);
-        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, 3, &switched);
+        let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &switched);
         entries.push(write_page(
             dir,
             "switched-preimage.md",
             "A switched preimage is caught",
-            "The house reveals a preimage that does not open the commitment. `resolve_bet` \
-             recomputes sha256 and rejects the settle; the wager survives.",
+            "The house reveals a preimage that does not open the table's commitment. \
+             `resolve_bet` recomputes sha256 and rejects the settle; the wager survives.",
             "a_switched_preimage_is_caught",
             &tx,
         ));
     }
 
-    // The house never shows: the player reclaims after the timeout.
+    // The house never shows.
     {
-        let mut b = QuasarBackend::new();
-        let table = open_table(&mut b);
-        let player = b.actor("Player", PLAYER_FUNDS);
         let (preimage, _) = preimage_where(|r| r <= 98);
+        let mut b = QuasarBackend::new();
+        let table = open_table(&mut b, 4, preimage);
+        let player = b.actor("Player", PLAYER_FUNDS);
         let placed_at = b.clock().slot;
-        let bet = place_bet(&mut b, &table, &player, 4, 50, &preimage);
+        let bet = place_bet(&mut b, &table, &player, 50);
         b.warp_to_slot(placed_at + REFUND_TIMEOUT_SLOTS + 1);
         let ix = refund_ix(
             table.id,
@@ -555,7 +587,7 @@ fn deal_the_table_and_report() {
             table.house.pubkey(),
             table.vault,
             bet,
-            4,
+            table.seed,
         );
         let tx = b.send(&[ix], &[&player]);
         entries.push(write_page(

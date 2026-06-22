@@ -1,27 +1,39 @@
-//! Player commits a bet and deposits the stake. The Bet PDA records the guess
-//! and the `sha256(preimage)` commitment; the stake moves into the vault.
+//! A player bets against an open table. The table (and its commitment) must
+//! already exist on-chain; the player adds a guess and their own `entropy`, and
+//! stakes into the vault. The commitment is no longer a player argument: it was
+//! posted by the house in `open_table`.
 
 use {
-    crate::{constants::*, error::DiceError, state::{Bet, BetInner, VaultPda}},
+    crate::{
+        constants::*,
+        error::DiceError,
+        state::{Bet, BetInner, Table, VaultPda},
+    },
     quasar_lang::{prelude::*, sysvars::Sysvar},
 };
 
 #[derive(Accounts)]
-#[instruction(seed: u64)]
+#[instruction(table_seed: u64)]
 pub struct PlaceBet {
     #[account(mut)]
     pub player: Signer,
 
-    /// The house identifies the vault; it neither signs nor is mutated here.
+    /// The house identifies the vault and the table; it neither signs nor is
+    /// mutated here.
     pub house: UncheckedAccount,
 
     #[account(mut, address = VaultPda::seeds(house.address()))]
     pub vault: UncheckedAccount,
 
+    /// The open round. Loading it as `Account<Table>` proves it exists (the house
+    /// has committed); a `place_bet` for an unopened table fails here.
+    #[account(address = Table::seeds(house.address(), table_seed))]
+    pub table: Account<Table>,
+
     #[account(
         init,
         payer = player,
-        address = Bet::seeds(vault.address(), player.address(), seed)
+        address = Bet::seeds(house.address(), table_seed, player.address())
     )]
     pub bet: Account<Bet>,
 
@@ -29,14 +41,10 @@ pub struct PlaceBet {
 }
 
 impl PlaceBet {
-    #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
     pub fn create_bet(
         &mut self,
-        seed: u64,
         guess_roll: u8,
         amount: u64,
-        commitment: [u8; 32],
         entropy: [u8; 32],
         bumps: &PlaceBetBumps,
     ) -> Result<(), ProgramError> {
@@ -48,13 +56,11 @@ impl PlaceBet {
 
         self.bet.set_inner(BetInner {
             player: *self.player.address(),
-            seed,
-            slot,
             amount,
             guess_roll,
             bump: bumps.bet,
-            commitment,
             entropy,
+            slot,
         });
         Ok(())
     }

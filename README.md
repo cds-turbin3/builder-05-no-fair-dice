@@ -16,38 +16,43 @@ An LLM came in handy to investigate and prototype the instruction introspection 
 
 ## The table
 
-Five instructions, played as a table:
+Six instructions, played as a table:
 
 | # | Instruction   | Who signs | What happens |
 |---|---------------|-----------|--------------|
 | 0 | `initialize`  | house     | seeds the house vault PDA with a bankroll |
-| 1 | `place_bet`   | player    | records a guess, the house `commitment` + player `entropy`, deposits the stake |
+| 5 | `open_table`  | house     | opens a round by posting `commitment = sha256(preimage)` on-chain |
+| 1 | `place_bet`   | player    | bets against an open table: records a guess + player `entropy`, deposits the stake |
 | 2 | `reveal`      | house     | a marker carrying the preimage (see below) |
 | 3 | `resolve_bet` | house     | settles the bet; pays a winner from the vault |
 | 4 | `refund_bet`  | player    | reclaims a stale, never-revealed bet after a timeout |
 
 The vault is a PDA at `["vault", house]`; it holds the bankroll and signs payouts with
-`invoke_signed`. Each bet is a PDA at `["bet", vault, player, seed]`, closed back to the
-player when the bet settles or refunds.
+`invoke_signed`. A round lives in a Table PDA at `["table", house, table_seed]` (the house's
+posted commitment), and each bet is a PDA at `["bet", house, table_seed, player]`. The bet
+closes to the player on settle or refund; the table closes to the house on settle.
 
 ## How the randomness works
 
 It is a **two-party commit-reveal** scheme over `sha256`; the clock is never an entropy source
 (slot is recorded only to time the refund). Both sides contribute:
 
-1. The house picks a random 32-byte `preimage` and computes `commitment = sha256(preimage)`.
-2. The player places a bet carrying that `commitment`, the player's own 32-byte `entropy`, a
-   guess, and a stake.
+1. The house picks a random 32-byte `preimage`, computes `commitment = sha256(preimage)`, and
+   **opens a table** — posting that commitment on-chain, house-signed, before any bet exists.
+2. The player **bets against the open table**, adding their own 32-byte `entropy`, a guess, and
+   a stake. The player reads the commitment from the table's on-chain state, not from an
+   off-chain handoff.
 3. To settle, the house sends `reveal(preimage)` and `resolve_bet` in **one transaction**.
    `resolve_bet` reads the preceding `reveal` out of the Instructions sysvar (this is the
-   introspection), then checks `sha256(preimage) == commitment`. A preimage that does not
+   introspection), then checks `sha256(preimage) == table.commitment`. A preimage that does not
    open the commitment is rejected (`CommitRevealMismatch`).
 
-The roll mixes both contributions: `sha256(preimage ++ entropy)`. The commitment binds the
-house (`sha256` is collision-resistant, so it can only reveal the one preimage that opens the
-commitment, and it committed before seeing `entropy`), and the player's entropy is public but
-useless for prediction (without the hidden preimage, the commitment reveals nothing about the
-roll). Neither side fixes the outcome alone.
+The roll mixes both contributions: `sha256(preimage ++ entropy)`. Because the commitment is
+posted on-chain in `open_table` *before* the bet, the chain itself witnesses that the house
+committed before the player chose `entropy`: the house can only reveal the one preimage that
+opens the commitment (`sha256` is collision-resistant) and cannot grind it after the fact. The
+player's entropy is public but useless for prediction (without the hidden preimage, the
+commitment reveals nothing about the roll). Neither side fixes the outcome alone.
 
 ## How the number determines the winner
 
@@ -95,9 +100,10 @@ The economics are a flat 1.5% house edge at every target (above). The randomness
 because the roll, `sha256(preimage ++ entropy)`, depends on a secret from each side that the
 other cannot work around:
 
-- **The house cannot grind.** It commits `sha256(preimage)` before the player chooses
-  `entropy`, and `sha256` collision-resistance pins it to that one preimage. It cannot search
-  for a preimage that produces a losing roll after seeing the player's entropy.
+- **The house cannot grind.** It posts `sha256(preimage)` on-chain in `open_table` before the
+  player chooses `entropy`, so the chain itself witnesses the ordering, and `sha256`
+  collision-resistance pins it to that one preimage. It cannot search for a preimage that
+  produces a losing roll after seeing the player's entropy.
 - **The player cannot predict.** The roll needs the preimage, and the player holds only its
   hash. `sha256` preimage-resistance means the on-chain `commitment` and the player's own
   `entropy` together reveal nothing about the roll until the house reveals.
@@ -113,16 +119,16 @@ vocabulary: the actors are the cast, the game's moves are the verbs, and a scena
 hand, start to finish. The winning roll, in full:
 
 ```rust
-let table = open_table(&mut backend);                // the house seeds its vault
+// pick a roll the player beats, then open a table committed to that preimage
+let (preimage, roll) = preimage_where(|r| r <= 98);
+let table = open_table(&mut backend, 1, preimage);   // house funds the vault + posts sha256(preimage)
 let player = backend.actor("Player", PLAYER_FUNDS);  // a named, funded signer
 let player_start = lamports(&backend, &player.pubkey());
 
-// pick a roll the player beats, then guess one above it
-let (preimage, roll) = preimage_where(|r| r <= 98);
-let bet = place_bet(&mut backend, &table, &player, 1, roll + 1, &preimage);
+let bet = place_bet(&mut backend, &table, &player, roll + 1);  // bet against the open table, guess one above
 
 // the house reveals and settles in one breath: [reveal, resolve_bet]
-let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, 1, &preimage);
+let tx = reveal_and_settle(&mut backend, &table, &player.pubkey(), bet, &table.preimage);
 
 assert!(tx.error.is_none());
 assert_eq!(
@@ -133,11 +139,11 @@ assert_eq!(
 assert_eq!(lamports(&backend, &bet), 0, "the wager is closed");
 ```
 
-Each verb hides the part you do not want in a test. `place_bet` lays out the instruction's
-flat bytes and derives the bet PDA; `reveal_and_settle` packs `reveal` and `resolve_bet` into
-the single transaction the introspection needs, so the test never spells out the
-two-instruction dance, it just settles. The assertions talk about the table, not the bytes:
-the player collected the payout, the wager is closed.
+Each verb hides the part you do not want in a test. `open_table` posts the commitment on-chain;
+`place_bet` lays out the instruction's flat bytes and derives the bet PDA; `reveal_and_settle`
+packs `reveal` and `resolve_bet` into the single transaction the introspection needs, so the
+test never spells out the two-instruction dance, it just settles. The assertions talk about the
+table, not the bytes: the player collected the payout, the wager is closed.
 
 All four scenarios (a winning roll, a losing roll, a switched preimage, a timeout refund) read
 this way.
@@ -154,14 +160,14 @@ transaction; `resolve_bet` introspects the preceding `reveal` and pays out.
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](dogfood/tests/gambling.rs#L353)
+**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](dogfood/tests/gambling.rs#L397)
 
 ### Structured execution log
 
 ```
-CPI Tree (3,070 BPF CU / 1,400,000 budget):
-├── reveal (35 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet (3,035 / 1,399,965 CU) dice
+CPI Tree (3,452 BPF CU / 1,400,000 budget):
+├── reveal (42 / 1,400,000 CU) dice (no CPIs)
+└── resolve_bet (3,410 / 1,399,958 CU) dice
     └── System
 ```
 
@@ -176,8 +182,8 @@ sequenceDiagram
     participant House
     participant dice
     participant System
-    House ->> dice: reveal (35cu)
-    House ->> dice: resolve_bet (3035cu)
+    House ->> dice: reveal (42cu)
+    House ->> dice: resolve_bet (3410cu)
     dice ->> System: Transfer
 ```
 
@@ -194,12 +200,14 @@ flowchart LR
     House([House]):::signer
     Player[(Player)]:::writable
     Vault([Vault]):::signer
+    Table[(Table)]:::writable
     Wager[(Wager)]:::writable
     System[System]:::program
     House -->|signs| dice
     Vault -->|signs| System
     dice -->|writes| Player
     dice -->|writes| Vault
+    dice -->|writes| Table
     dice -->|writes| Wager
     System -->|writes| Player
 ```
@@ -208,9 +216,9 @@ flowchart LR
 authority, which a boolean `is_ok()` never could.
 
 > **Scope.** This graph is the settle transaction alone. The player is a writable payee here,
-> not a signer: its own signature is in the earlier `place_bet` (committing the guess, entropy,
-> and stake), a separate transaction. Authority and ownership graphs are per-transaction, so a
-> participant's full provenance spans the scenario's transactions, not any single page.
+> not a signer: its signature is in the earlier `place_bet`, and the house's commit is in
+> `open_table` before that. Authority and ownership graphs are per-transaction, so a round's
+> full provenance spans three transactions (`open_table`, `place_bet`, settle), not any single page.
 
 ### Ownership graph
 
@@ -224,10 +232,12 @@ flowchart LR
     House[(House)]:::account
     Player[(Player)]:::account
     Vault[(Vault)]:::account
+    Table[(Table)]:::account
     Wager[(Wager)]:::account
     System -->|owns| House
     System -->|owns| Player
     System -->|owns| Vault
+    System -->|owns| Table
     System -->|owns| Wager
 ```
 

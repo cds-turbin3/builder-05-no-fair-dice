@@ -4,14 +4,14 @@
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](../tests/gambling.rs#L353)
+**Source.** [`tests/gambling.rs::the_house_pays_a_winning_roll`](../tests/gambling.rs#L397)
 
 ## Structured execution log
 
 ```
-CPI Tree (3,070 BPF CU / 1,400,000 budget):
-├── reveal (35 / 1,400,000 CU) dice (no CPIs)
-└── resolve_bet (3,035 / 1,399,965 CU) dice
+CPI Tree (3,452 BPF CU / 1,400,000 budget):
+├── reveal (42 / 1,400,000 CU) dice (no CPIs)
+└── resolve_bet (3,410 / 1,399,958 CU) dice
     └── System
 ```
 
@@ -23,8 +23,8 @@ sequenceDiagram
     participant House
     participant dice
     participant System
-    House ->> dice: reveal (35cu)
-    House ->> dice: resolve_bet (3035cu)
+    House ->> dice: reveal (42cu)
+    House ->> dice: resolve_bet (3410cu)
     dice ->> System: Transfer
 ```
 
@@ -41,12 +41,14 @@ flowchart LR
     House([House]):::signer
     Player[(Player)]:::writable
     Vault([Vault]):::signer
+    Table[(Table)]:::writable
     Wager[(Wager)]:::writable
     System[System]:::program
     House -->|signs| dice
     Vault -->|signs| System
     dice -->|writes| Player
     dice -->|writes| Vault
+    dice -->|writes| Table
     dice -->|writes| Wager
     System -->|writes| Player
 ```
@@ -63,9 +65,11 @@ flowchart LR
     House[(House)]:::account
     Player[(Player)]:::account
     Vault[(Vault)]:::account
+    Table[(Table)]:::account
     Wager[(Wager)]:::account
     System -->|owns| House
     System -->|owns| Player
     System -->|owns| Vault
+    System -->|owns| Table
     System -->|owns| Wager
 ```

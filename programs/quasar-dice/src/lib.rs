@@ -1,11 +1,12 @@
 //! Commit-reveal dice game, a native Quasar program. Pure SOL custody (a
-//! house-owned vault PDA), commit-reveal randomness over sha256, and instruction
-//! introspection: `resolve_bet` reads the preceding `reveal` instruction out of
-//! the Instructions sysvar to recover the preimage and confirm the house signed it.
+//! house-owned vault PDA), an on-chain commit (the house opens a table), commit-
+//! reveal randomness over sha256, and instruction introspection: `resolve_bet`
+//! reads the preceding `reveal` instruction out of the Instructions sysvar to
+//! recover the preimage and confirm the house signed it.
 //!
 //! Discriminators: initialize 0, place_bet 1, reveal 2, resolve_bet 3,
-//! refund_bet 4. `reveal`'s discriminator (2) is what the introspection parse
-//! checks; keep it in sync with `REVEAL_DISCRIMINATOR`.
+//! refund_bet 4, open_table 5. `reveal`'s discriminator (2) is what the
+//! introspection parse checks; keep it in sync with `REVEAL_DISCRIMINATOR`.
 
 #![no_std]
 // Accounts-struct fields are consumed by the derive macro's generated init / CPI
@@ -64,20 +65,31 @@ mod quasar_dice {
         ctx.accounts.handle(amount)
     }
 
-    /// Player commits a bet: records the guess, the house's `sha256(preimage)`
-    /// commitment, and the player's own `entropy`, then deposits the stake into
-    /// the vault. `seed` identifies the Bet PDA.
+    /// House opens a round by posting its `sha256(preimage)` commitment on-chain,
+    /// before any bet. `table_seed` identifies the Table PDA.
+    #[instruction(discriminator = 5)]
+    pub fn open_table(
+        ctx: Ctx<OpenTable>,
+        table_seed: u64,
+        commitment: [u8; 32],
+    ) -> Result<(), ProgramError> {
+        let _ = table_seed;
+        ctx.accounts.handle(commitment, &ctx.bumps)
+    }
+
+    /// Player bets against an open table: records the guess and the player's own
+    /// `entropy`, and deposits the stake. `table_seed` identifies the round.
     #[instruction(discriminator = 1)]
     pub fn place_bet(
         ctx: Ctx<PlaceBet>,
-        seed: u64,
+        table_seed: u64,
         amount: u64,
         guess_roll: u8,
-        commitment: [u8; 32],
         entropy: [u8; 32],
     ) -> Result<(), ProgramError> {
+        let _ = table_seed;
         ctx.accounts
-            .create_bet(seed, guess_roll, amount, commitment, entropy, &ctx.bumps)?;
+            .create_bet(guess_roll, amount, entropy, &ctx.bumps)?;
         ctx.accounts.deposit(amount)
     }
 
@@ -90,19 +102,19 @@ mod quasar_dice {
     }
 
     /// House settles a bet. Must directly follow a `reveal` in the same
-    /// transaction; the preimage is recovered by introspection. `seed`
-    /// identifies the Bet PDA. The Bet account is closed to the player.
+    /// transaction; the preimage is recovered by introspection. `table_seed`
+    /// identifies the round. The bet closes to the player, the table to the house.
     #[instruction(discriminator = 3)]
-    pub fn resolve_bet(ctx: Ctx<ResolveBet>, seed: u64) -> Result<(), ProgramError> {
-        let _ = seed;
+    pub fn resolve_bet(ctx: Ctx<ResolveBet>, table_seed: u64) -> Result<(), ProgramError> {
+        let _ = table_seed;
         ctx.accounts.resolve(&ctx.bumps)
     }
 
-    /// Player reclaims a stale, unrevealed bet after the timeout. `seed`
-    /// identifies the Bet PDA. The Bet account is closed to the player.
+    /// Player reclaims a stale, unrevealed bet after the timeout. `table_seed`
+    /// identifies the round. The bet closes to the player.
     #[instruction(discriminator = 4)]
-    pub fn refund_bet(ctx: Ctx<RefundBet>, seed: u64) -> Result<(), ProgramError> {
-        let _ = seed;
+    pub fn refund_bet(ctx: Ctx<RefundBet>, table_seed: u64) -> Result<(), ProgramError> {
+        let _ = table_seed;
         ctx.accounts.refund(&ctx.bumps)
     }
 }

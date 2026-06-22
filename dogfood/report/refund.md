@@ -4,13 +4,13 @@
 
 **Outcome.** The transaction succeeded.
 
-**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L437)
+**Source.** [`tests/gambling.rs::the_house_never_shows`](../tests/gambling.rs#L472)
 
 ## Structured execution log
 
 ```
-CPI Tree (2,035 BPF CU / 1,400,000 budget):
-└── refund_bet (2,035 / 1,400,000 CU) dice
+CPI Tree (2,033 BPF CU / 1,400,000 budget):
+└── refund_bet (2,033 / 1,400,000 CU) dice
     └── System
 ```
 
@@ -22,7 +22,7 @@ sequenceDiagram
     participant Player
     participant dice
     participant System
-    Player ->> dice: refund_bet (2035cu)
+    Player ->> dice: refund_bet (2033cu)
     dice ->> System: Transfer
 ```
 
