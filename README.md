@@ -183,7 +183,7 @@ sequenceDiagram
 
 ### Authority graph
 
-Who signed for what; an `invoke_signed` PDA appears as its own authority.
+Who signed for what **in this transaction**; an `invoke_signed` PDA appears as its own authority.
 
 ```mermaid
 flowchart LR
@@ -206,6 +206,11 @@ flowchart LR
 
 `Vault -->|signs| System` is the vault PDA's `invoke_signed` payout, surfaced as its own
 authority, which a boolean `is_ok()` never could.
+
+> **Scope.** This graph is the settle transaction alone. The player is a writable payee here,
+> not a signer: its own signature is in the earlier `place_bet` (committing the guess, entropy,
+> and stake), a separate transaction. Authority and ownership graphs are per-transaction, so a
+> participant's full provenance spans the scenario's transactions, not any single page.
 
 ### Ownership graph
 
