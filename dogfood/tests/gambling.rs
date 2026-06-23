@@ -21,7 +21,7 @@ use {
     std::str::FromStr,
     testsvm::{
         model::Transaction,
-        report::{render_index, render_scenario},
+        report::{record, render_scenario, Expect, Observation},
         TestSVM,
     },
     testsvm_quasar::QuasarBackend,
@@ -265,24 +265,35 @@ fn lamports(backend: &QuasarBackend, pk: &Pubkey) -> u64 {
     backend.get_account(pk).map(|a| a.lamports).unwrap_or(0)
 }
 
-/// Render one scenario's decisive transaction to a crime-scene page and return
-/// its index row.
-fn write_page(
+/// Capture one scenario's decisive transaction two ways: a lossless JSON record
+/// (`examples/report.rs` folds the corpus into the index + behavioral fingerprint,
+/// with a Source link back to each test) and a crime-scene page under `report/`
+/// (structured log, sequence diagram, authority + ownership graphs). `expect` is
+/// the declared verdict, checked against the actual transaction error.
+fn capture(
     dir: &str,
     file: &str,
     title: &str,
     intent: &str,
     test_fn: &str,
+    expect: Expect,
     tx: &Transaction,
-) -> (String, String, String) {
-    let outcome = if tx.error.is_none() { "succeeded" } else { "failed" };
+) {
     let manifest = env!("CARGO_MANIFEST_DIR");
+    record(Observation {
+        group: "Dice",
+        title,
+        test_name: test_fn,
+        test_file: "tests/gambling.rs",
+        manifest_dir: manifest,
+        expect,
+        tx,
+    });
     std::fs::write(
         format!("{dir}/{file}"),
         render_scenario(manifest, title, intent, "tests/gambling.rs", test_fn, tx),
     )
     .unwrap();
-    (file.into(), title.into(), outcome.into())
 }
 
 // --- the scenarios ---------------------------------------------------------
@@ -464,7 +475,6 @@ fn a_close_and_reopen_grind_is_caught() {
 fn deal_the_table_and_report() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/report");
     std::fs::create_dir_all(dir).unwrap();
-    let mut entries: Vec<(String, String, String)> = vec![];
 
     // The house pays a winning roll.
     {
@@ -474,15 +484,16 @@ fn deal_the_table_and_report() {
         let player = b.actor("Player", PLAYER_FUNDS);
         let bet = place_bet(&mut b, &table, &player, roll + 1);
         let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &table.preimage);
-        entries.push(write_page(
+        capture(
             dir,
             "winning-roll.md",
             "The house pays a winning roll",
             "A player beats the roll. The house reveals the preimage and settles in one \
              transaction; `resolve_bet` introspects the preceding `reveal` and pays out.",
             "the_house_pays_a_winning_roll",
+            Expect::Succeeds,
             &tx,
-        ));
+        );
     }
 
     // The house keeps a losing roll.
@@ -493,15 +504,16 @@ fn deal_the_table_and_report() {
         let player = b.actor("Player", PLAYER_FUNDS);
         let bet = place_bet(&mut b, &table, &player, roll);
         let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &table.preimage);
-        entries.push(write_page(
+        capture(
             dir,
             "losing-roll.md",
             "The house keeps a losing roll",
             "A guess that ties the roll loses. The settle introspects the reveal, finds no \
              win, and the stake stays with the house.",
             "the_house_keeps_a_losing_roll",
+            Expect::Succeeds,
             &tx,
-        ));
+        );
     }
 
     // A switched preimage is caught.
@@ -514,15 +526,16 @@ fn deal_the_table_and_report() {
         let mut switched = table.preimage;
         switched[0] ^= 0xff;
         let tx = reveal_and_settle(&mut b, &table, &player.pubkey(), bet, &switched);
-        entries.push(write_page(
+        capture(
             dir,
             "switched-preimage.md",
             "A switched preimage is caught",
             "The house reveals a preimage that does not open the table's commitment. \
              `resolve_bet` recomputes sha256 and rejects the settle; the wager survives.",
             "a_switched_preimage_is_caught",
+            Expect::Rejects,
             &tx,
-        ));
+        );
     }
 
     // The house never shows.
@@ -544,15 +557,16 @@ fn deal_the_table_and_report() {
         }
         .ix();
         let tx = b.send(&[ix], &[&player]);
-        entries.push(write_page(
+        capture(
             dir,
             "refund.md",
             "The house never shows",
             "The house never reveals. After the timeout the player reclaims the stake and the \
              wager closes.",
             "the_house_never_shows",
+            Expect::Succeeds,
             &tx,
-        ));
+        );
     }
 
     // The house closes an empty table.
@@ -567,14 +581,15 @@ fn deal_the_table_and_report() {
     }
     .ix();
         let tx = b.send(&[ix], &[&table.house]);
-        entries.push(write_page(
+        capture(
             dir,
             "close-empty-table.md",
             "The house closes an empty table",
             "A table opened but never bet against. The house reclaims its rent with `close_table`.",
             "the_house_closes_an_empty_table",
+            Expect::Succeeds,
             &tx,
-        ));
+        );
     }
 
     // A close-and-reopen grind is caught.
@@ -591,7 +606,7 @@ fn deal_the_table_and_report() {
     }
     .ix();
         let tx = b.send(&[ix], &[&table.house]);
-        entries.push(write_page(
+        capture(
             dir,
             "grind-caught.md",
             "A close-and-reopen grind is caught",
@@ -599,17 +614,10 @@ fn deal_the_table_and_report() {
              reopen with a substituted commitment after seeing the entropy) is rejected with \
              `TableInUse`.",
             "a_close_and_reopen_grind_is_caught",
+            Expect::Rejects,
             &tx,
-        ));
+        );
     }
 
-    let index = render_index(
-        "Quasar dice: the table, dealt",
-        "Every scenario the dice game plays through the testsvm-quasar engine. Each page carries \
-         the structured execution log, a sequence diagram, and the authority + ownership graphs \
-         that the program's own pass/fail assertion cannot show.",
-        &entries,
-    );
-    std::fs::write(format!("{dir}/index.md"), index).unwrap();
-    println!("wrote {} scenario pages + index.md to {dir}", entries.len());
+    println!("wrote scenario records + pages to {dir}; run `cargo run --example report` to fold them");
 }

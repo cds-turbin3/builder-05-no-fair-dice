@@ -4,7 +4,7 @@
 
 **Outcome.** The transaction failed: `custom program error: 0x8`.
 
-**Source.** [`tests/gambling.rs::a_close_and_reopen_grind_is_caught`](../tests/gambling.rs#L431)
+**Source.** [`tests/gambling.rs::a_close_and_reopen_grind_is_caught`](../tests/gambling.rs#L442)
 
 ## Structured execution log
 

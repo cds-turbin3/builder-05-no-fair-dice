@@ -14,7 +14,9 @@ publish = false
 path = "src/lib.rs"
 
 [dependencies]
-testsvm = { git = "https://github.com/cds-rs/anchor-litesvm", branch = "turbin3" }
+# `fingerprint-baseline` enables the observation report's run_cli + baseline
+# tarball, driven by examples/report.rs.
+testsvm = { git = "https://github.com/cds-rs/anchor-litesvm", branch = "turbin3", features = ["fingerprint-baseline"] }
 solana-pubkey = "3.0"
 solana-instruction = "3.2"
 
